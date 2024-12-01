@@ -22,7 +22,7 @@ from model.whole_network import PETReconNet, PETDenoiseNet, SwinDenoise
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 import os
-from model.whole_network import normalization2one
+from utils.data import normalization2one
 # from model.network_swinTrans import SwinIR
 from modelSwinUnet.SUNet import SUNet_model
 from torch.utils.tensorboard import SummaryWriter
@@ -165,7 +165,7 @@ def train(model_pre, model_recon, radon, train_loader, criterion, optimizer, ran
                 image_tensor = torch.from_numpy(image).permute(2, 0, 1)  # 从 (H, W, C) 转换为 (C, H, W)
 
                 # 记录图像到 TensorBoard
-                log_writer.add_image('train duration', image_tensor, epoch)
+                # log_writer.add_image('train duration', image_tensor, epoch)
         # logger.info(f'Train Loss: {running_loss:.4f}')
 
     loss_average = running_loss / len(train_loader)
@@ -249,7 +249,7 @@ def validate(model_pre, model_recon, radon, val_loader, criterion, rank, epoch, 
                     image_tensor = torch.from_numpy(image).permute(2, 0, 1)  # 从 (H, W, C) 转换为 (C, H, W)
 
                     # 记录图像到 TensorBoard
-                    log_writer.add_image('val duration', image_tensor, epoch)
+                    # log_writer.add_image('val duration', image_tensor, epoch)
         avg_loss = running_loss / len(val_loader)
         log_writer.add_scalar('val/loss', avg_loss, epoch)  # 在一个 tag 下面添加多个折线图
         return avg_loss
@@ -287,7 +287,7 @@ def test(model_pre, model_recon, radon, test_loader, criterion, rank, log):
         return psnr_avg, ssim_avg
 
 
-def main(logger, args, config, log_writer):
+def main(logger, args):
     # # 数据
     from model.network_swinTrans import SwinIR
 
@@ -328,6 +328,8 @@ def main(logger, args, config, log_writer):
     # denoise_model_pre = PETDenoiseNet(device=rank).to(rank)
     # log_writer.add_graph(denoise_model_pre, torch.randn(args.bs, 1, 128, 180).to(rank))
     denoise_model = WaveletFilterNet(180, 128).to(rank)
+    denoise_model_pre = nn.DataParallel(denoise_model_pre)
+    denoise_model = nn.DataParallel(denoise_model)
     logger.info(denoise_model_pre)
     logger.info(denoise_model)
     # log_writer.add_graph(denoise_model, [torch.randn(args.bs, 1, 128, 128).to(rank), torch.randn(args.bs, 1, 128, 180).to(rank), torch.randn(args.bs, 1, 128, 180).to(rank)])
@@ -387,7 +389,7 @@ if __name__ == '__main__':
     parser.add_argument('--mode', default='none', type=str, help='mode of noise')
     parser.add_argument('--scale_factor', default=0.5, type=float, help='counts level for poisson noise, HD*0.5=LD')
     parser.add_argument('--aod', default=True, type=bool, help='patch of the angular or distance, the former by default')
-    parser.add_argument('--CUDA_VISIBLE_DEVICES', default='3, 6, 7', type=str, help='number of CUDA_VISIBLE_DEVICES')
+    parser.add_argument('--CUDA_VISIBLE_DEVICES', default='2, 4, 5, 7', type=str, help='number of CUDA_VISIBLE_DEVICES')
     parser.add_argument('--opt_path', default='./modelSwinUnet/training.yaml', type=str,
                         help='path of SwinUnet preset file')
     parser.add_argument('--loss', default='L1', type=str, help='loss mode, L1 or L2')
@@ -429,12 +431,12 @@ if __name__ == '__main__':
     logger.addHandler(console_handler)
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.CUDA_VISIBLE_DEVICES
-    with open(args.opt_path, 'r') as config:
-        opt = yaml.safe_load(config)
+    # with open(args.opt_path, 'r') as config:
+    #     opt = yaml.safe_load(config)
     logger.info(f'seed = {seed}')
     logger.info(args)
-    logger.info(opt)
+    # logger.info(opt)
     # 初始化 SummaryWriter
     writer_1 = SummaryWriter(log_dir=os.path.join(args.log_dir, f"experiment_{seed}"))  # 可以指定日志路径
 
-    main(logger, args, opt, writer_1)
+    main(logger, args)

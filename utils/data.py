@@ -25,6 +25,7 @@ def normalization2one(input_tensor: torch.Tensor or np.ndarray) -> torch.Tensor:
         assert isinstance(input_tensor, torch.Tensor), "Input must be a PyTorch tensor or a NumPy array."
         assert len(input_tensor.shape) == 4, "Input tensor must have 4 dimensions (batchsize, channels, height, width)."
 
+    input_tensor = input_tensor.contiguous()
     # 计算每个batch的最小值和最大值，避免reshape所带来的额外内存开销
     input_shape = input_tensor.shape
     min_val = input_tensor.view(input_tensor.size(0), -1).min(dim=1, keepdim=True)[0].view(-1, 1, 1, 1)
@@ -99,13 +100,13 @@ def add_noise(radon, img=None, sino=None, ratio=0.2, mode='none', scale_factor=0
     if mode == 'none':
         img = img.cuda().float()
         img = img[:, None, :, :] if len(img.shape)==3 else img
-        noisy_image = img.clone().to('cpu')
+        noisy_image = img.clone().to('cuda')
         noisy_image = set_random_pixels_to_zero(noisy_image, ratio)
         # plt.imshow(noisy_image[0, 0, :, :].cpu().squeeze().numpy()), plt.show()
-        me_radon = Radon(n_theta=180, circle=True, device='cpu')
-        out_sino = normalization2one(me_radon(noisy_image.to('cpu')))
+        me_radon = Radon(n_theta=180, circle=True, device='cuda')
+        out_sino = normalization2one(me_radon(noisy_image.to('cuda')))
         del noisy_image
-        out_sino = out_sino - ratio*normalization2one(sino.to('cpu').unsqueeze(1))
+        out_sino = out_sino - ratio*normalization2one(sino.to('cuda'))
         return out_sino.squeeze(1)
     elif mode == 'poisson':
         sino = sino[:, None, :, :] if len(sino.shape) == 3 else sino
@@ -273,7 +274,7 @@ class DatasetPETRecon(data.Dataset):
         X_train_noisy2 = torch.unsqueeze(X_train_noisy2, 1) if len(X_train_noisy2.shape) == 3 else X_train_noisy2
         Y_train = torch.unsqueeze(Y_train, 1) if len(Y_train.shape) == 3 else Y_train
 
-        return X_train_noisy1.transpose(3, 2), X_train_noisy2.transpose(3, 2), Y_train, sino_label.transpose(0, 2, 1), picLD_train
+        return X_train_noisy1.transpose(3, 2), X_train_noisy2.transpose(3, 2), Y_train, sino_label.transpose(0, 1, 3, 2), picLD_train
 
     def get_all_in(self):
         return self.x2_noisy, self.Y_train
