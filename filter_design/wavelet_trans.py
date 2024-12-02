@@ -51,10 +51,15 @@ def haar_wavelet_inverse_transform(LL, LH, HL, HH):
 
 
 class WaveletFilterNet(nn.Module):
-    def __init__(self, h, w, alpha=1.2):
+    def __init__(self, h, w, alpha=1):
         super(WaveletFilterNet, self).__init__()
-        t_shape = (1, 3, h // 2, w // 2)
-        self.filter = torch.Tensor(alpha * torch.ones(t_shape))
+        t_shape = (1, 1, h // 2, w // 2)
+        # self.filter = torch.cat([(alpha-0.1) * torch.ones(t_shape), alpha*torch.ones(t_shape), (alpha+0.1)*torch.ones(t_shape)], dim=1)
+        self.filter = torch.cat([
+            (alpha - 0.1) * torch.ones(t_shape, device='cuda'),  # 张量 1
+            alpha * torch.ones(t_shape, device='cuda'),  # 张量 2
+            (alpha + 0.1) * torch.ones(t_shape, device='cuda')  # 张量 3
+        ], dim=1)  # 在 dim=1（第二个维度）拼接
         self.filter = nn.Parameter(self.filter, requires_grad=True)
 
     def forward(self, x):

@@ -16,8 +16,10 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '.', '/'
 # from recon_astraFBP import sino2pic as s2p
 
 
-def normalization2one(input_tensor: torch.Tensor or np.ndarray) -> torch.Tensor:
+def normalization2one(input_tensor: torch.Tensor or np.ndarray, disable=True) -> torch.Tensor:
     # 判断是否为 numpy 数组且维度为 (batchsize, h, w)，若是则转换为 tensor
+    if disable:
+        return input_tensor
     if isinstance(input_tensor, np.ndarray):
         assert len(input_tensor.shape) == 3, "NumPy input must have dimensions (batchsize, height, width)."
         input_tensor = torch.from_numpy(input_tensor).float().unsqueeze(1).to('cuda')

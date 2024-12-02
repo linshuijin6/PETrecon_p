@@ -18,7 +18,23 @@ import torch.nn.functional as F
 import torch.utils.checkpoint as checkpoint
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 
-from utils.normalize import normalization2one
+def normalization2one(input_tensor: torch.Tensor or np.ndarray) -> torch.Tensor:
+    # 假设输入的 tensor 形状为 (batchsize, channels=1, h, w) 或 numpy 形状为 (batchsize, h, w)
+    # input_tensor = torch.randn(4, 1, 64, 64)  # 示例的输入张量
+    input_tensor = torch.from_numpy(input_tensor).to('cuda').unsqueeze(1).float() if isinstance(input_tensor, np.ndarray) else input_tensor
+
+    # 为了每个 batch 归一化，我们要按batch维度进行最小值和最大值的计算
+    # 计算每个batch的最小值和最大值，保持维度为 (batchsize, 1, 1, 1)
+    min_val = input_tensor.reshape(input_tensor.size(0), -1).min(dim=1)[0].reshape(-1, 1, 1, 1)
+    max_val = input_tensor.reshape(input_tensor.size(0), -1).max(dim=1)[0].reshape(-1, 1, 1, 1)
+
+    # 进行归一化，将所有数值归一化到 [0, 1] 区间
+    normalized_tensor = (input_tensor - min_val) / (max_val - min_val + 1e-8)  # 1e-8 防止除以0
+    assert input_tensor.shape == normalized_tensor.shape
+    # normalized_tensor = normalized_tensor * 1.0 - 0.5
+
+    return normalized_tensor  # 确认输出形状 (batchsize, 1, h, w)
+
 
 '''
 Multilayer Perceptron
@@ -42,7 +58,7 @@ class Mlp(nn.Module):
         return x
 
 
-def window_partition(x, window_size):
+def window_partition(x, window_size, input_resolution):
     """
     Args:
         x: (B, H, W, C)
@@ -51,8 +67,7 @@ def window_partition(x, window_size):
     Returns:
         windows: (num_windows*B, window_size, window_size, C)
     """
-    window_size_plus = 1
-    window_size = [window_size_plus, window_size]
+    window_size = [1, window_size] if input_resolution[1]==4 else [window_size, 1]
     B, H, W, C = x.shape
     x = x.view(B, H // window_size[0], window_size[0], W // window_size[1], window_size[1], C)
     windows = x.permute(0, 1, 3, 2, 4, 5).contiguous().view(-1, window_size[0], window_size[1], C)
@@ -71,7 +86,7 @@ def window_reverse(windows, window_size, H, W):
         x: (B, H, W, C)
     """
     B = int(windows.shape[0] / (H * W / 1 / window_size))
-    x = windows.view(B, H // 1, W // window_size, 1, window_size, -1)
+    x = windows.view(B, H // 1, W // window_size, 1, window_size, -1) if W // window_size else windows.view(B, H // window_size, W // 1, window_size, 1, -1)
     x = x.permute(0, 1, 3, 2, 4, 5).contiguous().view(B, H, W, -1)
     return x
 
@@ -90,11 +105,11 @@ class WindowAttention(nn.Module):
         proj_drop (float, optional): Dropout ratio of output. Default: 0.0
     """
 
-    def __init__(self, dim, window_size, num_heads, qkv_bias=True, qk_scale=None, attn_drop=0., proj_drop=0.):
+    def __init__(self, dim, window_size, num_heads, qkv_bias=True, qk_scale=None, attn_drop=0., proj_drop=0., input_size=(1, 45)):
 
         super().__init__()
         self.dim = dim
-        self.window_size = [1, window_size]  # Wh, Ww
+        self.window_size = [1, window_size] if input_size[1]==4 else [window_size, 1] # Wh, Ww
         self.num_heads = num_heads  # number of head 6
         head_dim = dim // num_heads  # head_dim: 180//6=30
         self.scale = qk_scale or head_dim ** -0.5
@@ -227,7 +242,7 @@ class SwinTransformerBlock(nn.Module):
         self.norm1 = norm_layer(dim)
         self.attn = WindowAttention(
             dim, window_size=self.window_size, num_heads=num_heads,
-            qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
+            qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop, input_size = self.input_resolution)
 
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.norm2 = norm_layer(dim)
@@ -244,8 +259,7 @@ class SwinTransformerBlock(nn.Module):
     def calculate_mask(self, x_size):
         # calculate attention mask for SW-MSA
         window_size_plus = 1
-        window_size = [window_size_plus, self.window_size] if self.input_resolution[1] < 128 else [self.window_size,
-                                                                                                   window_size_plus]
+        window_size = [window_size_plus, self.window_size] if self.input_resolution[1] < 128 else [self.window_size, window_size_plus]
         shift_size = [0, self.shift_size] if self.input_resolution[1] < 128 else [self.shift_size, 0]
         H, W = x_size
         img_mask = torch.zeros((1, H, W, 1))  # 1 H W 1
@@ -261,7 +275,7 @@ class SwinTransformerBlock(nn.Module):
                 img_mask[:, h, w, :] = cnt
                 cnt += 1
 
-        mask_windows = window_partition(img_mask, self.window_size)  # nW, window_size, window_size, 1
+        mask_windows = window_partition(img_mask, self.window_size, self.input_resolution)  # nW, window_size, window_size, 1
         mask_windows = mask_windows.view(-1, 1 * self.window_size)
         attn_mask = mask_windows.unsqueeze(1) - mask_windows.unsqueeze(2)
         attn_mask = attn_mask.masked_fill(attn_mask != 0, float(-100.0)).masked_fill(attn_mask == 0, float(0.0))
@@ -285,7 +299,7 @@ class SwinTransformerBlock(nn.Module):
             shifted_x = x  # shifted_x (4,96,96,180) (batch_in_each_GPU, embedding_channel, H, W)
 
         # partition windows
-        x_windows = window_partition(shifted_x, self.window_size)  # (576,8,8,180) (nW*B, window_size, window_size, C)  nW:number of Windows
+        x_windows = window_partition(shifted_x, self.window_size, self.input_resolution)  # (576,8,8,180) (nW*B, window_size, window_size, C)  nW:number of Windows
         x_windows = x_windows.view(-1, 1 * self.window_size, C)  # (576,64,180) (nW*B, window_size*window_size, C)  nW:number of Windows
 
         # W-MSA/SW-MSA (to be compatible for testing on images whose shapes are the multiple of window size
@@ -295,7 +309,7 @@ class SwinTransformerBlock(nn.Module):
             attn_windows = self.attn(x_windows, mask=self.calculate_mask(x_size).to(x.device))  # (576,64,180) (nW*B, window_size*window_size, C)  nW:number of Windows
 
         # merge windows
-        attn_windows = attn_windows.view(-1, 1, self.window_size, C)  # (576,8,8,180) (nW*B, window_size, window_size, C)  nW:number of Windows
+        attn_windows = attn_windows.view(-1, 1, self.window_size, C) if self.input_resolution[1]<128 else attn_windows.view(-1, self.window_size, 1, C)# (576,8,8,180) (nW*B, window_size, window_size, C)  nW:number of Windows
         shifted_x = window_reverse(attn_windows, self.window_size, H, W)  # B H' W' C shifted_x (4,96,96,180) (batch_in_each_GPU, embedding_channel, H, W)
 
         # reverse cyclic shift
@@ -887,7 +901,9 @@ class SwinIR(nn.Module):
 
     def forward(self, x):
         H, W = x.shape[2:]  # x (4,1,96,96) (batch_size_in_each_GPU, input_image_channel, H (random-crop 96 in traning and 256 in testing), W)
+        # x = normalization2one(x)
         x = self.check_image_size(x)  # 检查x的尺寸是否是window_size的整数倍，如果不是，进行padding
+        # self.mean = x.mean(dim=(1, 2, 3)).type_as(x)[:, None, None, None]
 
         self.mean = self.mean.type_as(x)
         x = (x - self.mean) * self.img_range
@@ -952,7 +968,7 @@ if __name__ == '__main__':
     width = 180
     device = 'cuda'
     torch.cuda.empty_cache()
-    os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
     # file_data = np.load('/home/ssddata/linshuijin/PETrecon/simulation_angular/angular_180/test_transverse_sinoHD.npy', allow_pickle=True)[:4, :, :]
     # file_data = normalization2one(np.array(Image.open('../12.jpg'))[:1200, :1200, :1].transpose(2, 1, 0))
 
@@ -961,7 +977,7 @@ if __name__ == '__main__':
                    in_chans=1,
                    img_size=[128, 180],
                    window_size=4,
-                   patch_size=[1, 45],
+                   patch_size=[32, 1],
                    img_range=1.0,
                    depths=[2, 6, 2],
                    embed_dim=180,
