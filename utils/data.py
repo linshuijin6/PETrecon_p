@@ -78,16 +78,24 @@ def set_random_pixels_to_zero(data, ratio):
         raise ValueError("Ratio must be between 0 and 1.")
 
     batchsize, c, h, w = data.shape
-    # 计算要设为0的像素数量
-    num_pixels_to_zero = int(batchsize * c * h * w * ratio)
 
-    # 随机选择要设为0的索引
-    indices = torch.randperm(batchsize * c * h * w)[:num_pixels_to_zero]
+    # 随机生成一个 mask，其中每个像素为 1 的概率是 ratio
+    mask = torch.rand(batchsize, c, h, w, device=data.device) < ratio
 
-    # 将对应的像素值设为0
-    data_flat = data.view(-1)  # 展平张量
-    data_flat[indices] = 0
-    return data_flat.view(batchsize, c, h, w)  # 还原原始形状
+    # 应用掩码，将对应像素值设为 0
+    data *= mask
+    return data
+
+    # # 计算要设为0的像素数量
+    # num_pixels_to_zero = int(batchsize * c * h * w * ratio)
+    #
+    # # 随机选择要设为0的索引
+    # indices = torch.randperm(batchsize * c * h * w)[:num_pixels_to_zero]
+    #
+    # # 将对应的像素值设为0
+    # data_flat = data.view(-1)  # 展平张量
+    # data_flat[indices] = 0
+    # return data_flat.view(batchsize, c, h, w)  # 还原原始形状
 
 
 # 加噪声函数（适用于 PyTorch tensor）
@@ -108,7 +116,7 @@ def add_noise(radon, img=None, sino=None, ratio=0.2, mode='none', scale_factor=0
         me_radon = Radon(n_theta=180, circle=True, device='cuda')
         out_sino = normalization2one(me_radon(noisy_image.to('cuda')))
         del noisy_image
-        out_sino = out_sino - ratio*normalization2one(sino.to('cuda'))
+        out_sino = out_sino - (1-ratio)*normalization2one(sino.to('cuda'))
         return out_sino.squeeze(1)
     elif mode == 'poisson':
         sino = sino[:, None, :, :] if len(sino.shape) == 3 else sino
@@ -271,9 +279,13 @@ class DatasetPETRecon(data.Dataset):
         # picLD_train = picLD_train[:, None, :, :] if picLD_train.shape[1] != 1 else picLD_train
         # gau_std = torch.std(X_train).item()*0.1
         # X_train_noisy1, X_train_noisy2 = add_noise(picLD_train, self.radon, self.ratio, mode='poisson', scale_factor=8e4), X_train  # noise2noise策略
-        X_train_noisy1, X_train_noisy2 = add_noise(self.radon, img=picLD_train, sino=X_train, ratio=self.ratio, mode=self.mode, scale_factor=self.scale_factor), X_train  # noise2noise策略
+        if 'test' in name_pre:
+            X_train_noisy1, X_train_noisy2 = X_train, X_train
+        else:
+            X_train_noisy1, X_train_noisy2 = add_noise(self.radon, img=picLD_train, sino=X_train, ratio=self.ratio, mode=self.mode, scale_factor=self.scale_factor), X_train  # noise2noise策略
         X_train_noisy1 = torch.unsqueeze(X_train_noisy1, 1) if len(X_train_noisy1.shape) == 3 else X_train_noisy1
         X_train_noisy2 = torch.unsqueeze(X_train_noisy2, 1) if len(X_train_noisy2.shape) == 3 else X_train_noisy2
+        sino_label = sino_label[:, None, :, :] if len(sino_label.shape) == 3 else sino_label
         Y_train = torch.unsqueeze(Y_train, 1) if len(Y_train.shape) == 3 else Y_train
 
         return X_train_noisy1.transpose(3, 2), X_train_noisy2.transpose(3, 2), Y_train, sino_label.transpose(0, 1, 3, 2), picLD_train

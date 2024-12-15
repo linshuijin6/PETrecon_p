@@ -108,11 +108,13 @@ def train(model_pre, model_recon, radon, train_loader, criterion, optimizer, ran
 
         x2_denoised = normalization2one(x2)
         # 平均输出的sinogram
-        aver_x1 = (x1_denoised + x2_denoised) / 2
-        w = torch.sigmoid(10*(x1_denoised-torch.Tensor(0.5)))  #将灰度值从0~1平移到-0.5~0.5，使得sigmoid更恰当
-        aver_x1 = (normalization2one(x1_denoised * w) + x2_denoised)/2
+        # aver_x2 = (x1_denoised + x2_denoised) / 2
+        aver_x2 = x1_denoised
+        w = torch.sigmoid(10 * (x1_denoised - torch.tensor(0.5, device=x1_denoised.device))).detach()  #将灰度值从0~1平移到-0.5~0.5，使得sigmoid更恰当
+        aver_x1 = (normalization2one(x1_denoised * w) + x2_denoised) / 2
         aver_x = model_recon(aver_x1)
         mid_recon1 = normalization2one(radon.backprojection(radon.filter_sinogram(aver_x1)))
+        mid_recon2 = normalization2one(radon.backprojection(radon.filter_sinogram(aver_x2)))
         mid_recon = normalization2one(radon.backprojection(radon.filter_sinogram(aver_x)))
 
         # 计算mask角度下的loss
@@ -124,9 +126,11 @@ def train(model_pre, model_recon, radon, train_loader, criterion, optimizer, ran
         i_in_m1, i_in_m2 = mid_recon * mask_p1, mid_recon * mask_p2
         s_in_1, s_in_2 = radon.forward(i_in_m1), radon.forward(i_in_m2)
         s_out_1, s_out_2 = model_pre(s_in_1), model_pre(s_in_2)
-        i_out_1, i_out_2 = radon.backprojection(radon.filter_sinogram(s_out_1)), radon.backprojection(radon.filter_sinogram(s_out_2))
+        i_out_1, i_out_2 = radon.backprojection(radon.filter_sinogram(s_out_1)), radon.backprojection(
+            radon.filter_sinogram(s_out_2))
         i_out_m12, i_out_m21 = i_out_1 * mask_p2, i_out_2 * mask_p1
-        lsm1, lsm2 = criterion(normalization2one(i_out_m12), normalization2one(i_in_m2)), criterion(normalization2one(i_out_m21), normalization2one(i_in_m1))
+        lsm1, lsm2 = criterion(normalization2one(i_out_m12), normalization2one(i_in_m2)), criterion(
+            normalization2one(i_out_m21), normalization2one(i_in_m1))
         lsi = criterion(normalization2one(i_out_1), normalization2one(i_out_2))
         lsm = lsm1 + lsm2
         ls_post = lsm + lsi
@@ -142,7 +146,6 @@ def train(model_pre, model_recon, radon, train_loader, criterion, optimizer, ran
             if param.grad is not None and torch.isnan(param.grad).sum() > 0:
                 print(f"NaN detected in gradient of {name}")
 
-
         loss_cur = loss.item() / bs
         lossm_cur = lsm.item() / bs
         lossi_cur = lsi.item() / bs
@@ -152,12 +155,23 @@ def train(model_pre, model_recon, radon, train_loader, criterion, optimizer, ran
                 f'Epoch:{epoch}, Iteration: {iteration}/{len(train_loader)}, a_loss: {loss_cur:.4f}, loss_m: {lossm_cur:.4f}, loss_i: {lossi_cur:.4f}, Time/p_i: {time.time() - time_s:.4f}')
 
             # 定义图像数据和标题
-            pics = [x1, x2, x1_denoised, aver_x, picLD, mid_recon1, s_in_1, s_in_2, s_out_1, s_out_2,
-                    i_out_m12, i_in_m2, i_out_m21, i_in_m1, aver_x1, sino_label, mid_recon, Y]
-            titles = ["x1", "x2", "x1_denoised", "aver_x", "input_LD", "mid_recon1", "sino_p1", "sino_p2", "sino_recon_p1", "sino_recon_p2",
-                      'i_out_m12', 'i_in_m2', 'i_out_m21', 'i_in_m1', 'aver_recon_sino', 'sino_label', 'pic_recon', 'pic_label']
+            pics = [x1, x2, x1_denoised, aver_x, picLD, mid_recon,
+                    aver_x1, aver_x2, mid_recon1, mid_recon2, sino_label, Y]
+            titles = ["x1", "x2", "x1_denoised", "aver_x", "input_LD", "mid_recon",
+                      "aver_x1", "aver_x2", "mid_recon1", "mid_recon2", "sino_label", "Y"]
             # 设置图像整体大小
-            fig, axes = plt.subplots(9, 2, figsize=(12, 18))
+            fig, axes = plt.subplots(6, 2, figsize=(12, 18))
+
+            # # 定义图像数据和标题
+            # pics = [x1, x2, x1_denoised, aver_x, picLD, mid_recon1, s_in_1, s_in_2, s_out_1, s_out_2,
+            #         i_out_m12, i_in_m2, i_out_m21, i_in_m1, aver_x1, sino_label, mid_recon, Y]
+            # titles = ["x1", "x2", "x1_denoised", "aver_x", "input_LD", "mid_recon1", "sino_p1", "sino_p2",
+            #           "sino_recon_p1", "sino_recon_p2",
+            #           'i_out_m12', 'i_in_m2', 'i_out_m21', 'i_in_m1', 'aver_recon_sino', 'sino_label', 'pic_recon',
+            #           'pic_label']
+            # # 设置图像整体大小
+            # fig, axes = plt.subplots(9, 2, figsize=(12, 18))
+
             fig.subplots_adjust(left=0.05, right=0.95, top=0.92, bottom=0.05, hspace=0.3, wspace=0.2)  # 减少图像间的间距
 
             # 绘制每个子图
@@ -223,9 +237,13 @@ def validate(model_pre, model_recon, radon, val_loader, criterion, rank, epoch, 
             x2_denoised = model_pre(x2)
             # x2_denoised = x2
             # 平均输出的sinogram
+            w = torch.sigmoid(10 * (x2_denoised - torch.tensor(0.5, device=x1_denoised.device))).detach()  # 将灰度值从0~1平移到-0.5~0.5，使得sigmoid更恰当
+            aver_xt = normalization2one(x2_denoised * w)
+
             aver_x = x2_denoised
             aver_x1 = model_recon(aver_x)
             mid_recon = normalization2one(radon.backprojection(radon.filter_sinogram(aver_x1)))
+            mid_recont = normalization2one(radon.backprojection(radon.filter_sinogram(aver_xt)))
 
             # PET图去噪
             # p_out = model_recon(mid_recon, aver_x, torch.ones_like(aver_x))
@@ -238,11 +256,12 @@ def validate(model_pre, model_recon, radon, val_loader, criterion, rank, epoch, 
             if iteration % 40 == 0:
                 logger.info(f'Epoch:{epoch}, Validation Loss: {loss_cur:.4f}')
                 # 定义图像数据和标题
-                pics = [x1, x2, x1_denoised, aver_x, x2_denoised, aver_x, mid_recon, picLD, aver_x, sino_label, mid_recon, Y]
-                titles = ["x1", "x2", "x1_denoised", "aver_x", "x2_denoised", "aver_x", "mid_recon", "input_LD", "sino_recon",
-                          'label_sino', 'pic_recon', 'label']
+                pics = [x1, x2, x1_denoised, aver_x, x2_denoised, aver_x, mid_recon, picLD, aver_x, sino_label,
+                        mid_recon, Y, aver_xt, mid_recont]
+                titles = ["x1", "x2", "x1_denoised", "aver_x", "x2_denoised", "aver_x", "mid_recon", "input_LD",
+                          "sino_recon", 'label_sino', 'pic_recon', 'label', 'aver_xt', 'mid_recont']
                 # 设置图像整体大小
-                fig, axes = plt.subplots(6, 2, figsize=(12, 18))
+                fig, axes = plt.subplots(7, 2, figsize=(12, 18))
                 fig.subplots_adjust(left=0.05, right=0.95, top=0.92, bottom=0.05, hspace=0.3, wspace=0.2)  # 减少图像间的间距
 
                 # 绘制每个子图
@@ -309,7 +328,7 @@ def test(model_pre, model_recon, radon, test_loader, criterion, rank, logger, lo
             # 平均输出的sinogram
             aver_x = x2_denoised
             aver_x1 = model_recon(aver_x)
-            mid_recon_t = normalization2one(radon.backprojection(radon.filter_sinogram(aver_x1)))
+            mid_recon_t = normalization2one(radon.backprojection(radon.filter_sinogram(aver_x)))
             mid_recon_list = mid_recon_t if iteration == 0 else torch.cat([mid_recon_list, mid_recon_t], dim=0)
             label_list = Y if iteration == 0 else torch.cat([label_list, Y], dim=0)
         mid_recon_list = mid_recon_list.squeeze()
@@ -369,7 +388,7 @@ def main(args, writer):
 
     logger = log_gen(args)
     if args.checkpoints:
-        denoise_model_pre.load_state_dict(torch.load(f'./model/denoise_pre_weight_best.pth'))
+        denoise_model_pre.load_state_dict(torch.load(f'./log/log_file_8160963/denoise_pre_weight_best.pth'))
         logger.info('load pre model...')
         # denoise_model.load_state_dict(torch.load(f'./model/denoise_weight_best.pth'))
     # print(torch.cuda.memory_summary())
@@ -386,11 +405,11 @@ def main(args, writer):
     # 创建优化器，为不同的网络设置不同的学习率
     optimizer = optim.SGD([
         {'params': denoise_model_pre.parameters(), 'lr': args.lr},  # net1 的学习率为 0.01
-        {'params': denoise_model.parameters(), 'lr': 10*args.lr}  # net2 的学习率为 0.001
+        {'params': denoise_model.parameters(), 'lr': 10 * args.lr}  # net2 的学习率为 0.001
     ])
 
     # 训练
-    num_epochs = 20
+    num_epochs = 40
     val_loss_best = 1
     if not args.test:
         for epoch in range(num_epochs):
@@ -399,7 +418,8 @@ def main(args, writer):
             train_loss = train(denoise_model_pre, denoise_model, radon, train_loader, criterion, optimizer, rank, epoch,
                                logger, writer)
             logger.info('start validate !')
-            val_loss = validate(denoise_model_pre, denoise_model, radon, val_loader, criterion, rank, epoch, logger, writer)
+            val_loss = validate(denoise_model_pre, denoise_model, radon, val_loader, criterion, rank, epoch, logger,
+                                writer)
             logger.info(f'Epoch {epoch + 1}/{num_epochs} done! Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}')
             writer.close()  # 训练结束，不再写入数据，关闭writer
             if val_loss < val_loss_best:
@@ -418,11 +438,11 @@ if __name__ == '__main__':
     parser.add_argument('--bs', default=4, type=int, help='batch_size')
     parser.add_argument('--root_path', default='./simulation_angular/', type=str,
                         help='Input images')
-    parser.add_argument('--lr', default=2e-5, type=float, help='learning rate')
-    parser.add_argument('--ratio', default=0.2, type=float, help='noise ratio')
+    parser.add_argument('--lr', default=2e-4, type=float, help='learning rate')
+    parser.add_argument('--ratio', default=0.8, type=float, help='not noise ratio')
 
-    parser.add_argument('--alpha', default=0.2, type=float, help='importance of the smooth of sinogram')
-    parser.add_argument('--beta', default=0.4, type=float, help='importance of the delta of pic')
+    parser.add_argument('--alpha', default=1, type=float, help='importance of the smooth of sinogram')
+    parser.add_argument('--beta', default=1, type=float, help='importance of the delta of pic')
     parser.add_argument('--log_dir', default='./log_file/', type=str,
                         help='Directory for results')
     parser.add_argument('--weights',
@@ -430,12 +450,13 @@ if __name__ == '__main__':
                         help='Path to weights')
     parser.add_argument('--mode', default='none', type=str, help='mode of noise')
     parser.add_argument('--scale_factor', default=0.5, type=float, help='counts level for poisson noise, HD*0.5=LD')
-    parser.add_argument('--aod', default=True, type=bool, help='patch of the angular or distance, the former by default')
-    parser.add_argument('--CUDA_VISIBLE_DEVICES', default='5, 7', type=str, help='number of CUDA_VISIBLE_DEVICES')
+    parser.add_argument('--aod', default=True, type=bool,
+                        help='patch of the angular or distance, the former by default')
+    parser.add_argument('--CUDA_VISIBLE_DEVICES', default='4', type=str, help='number of CUDA_VISIBLE_DEVICES')
     parser.add_argument('--opt_path', default='./modelSwinUnet/training.yaml', type=str,
                         help='path of SwinUnet preset file')
     parser.add_argument('--loss', default='L1', type=str, help='loss mode, L1 or L2')
-    parser.add_argument('--show_tr', default=True, type=bool, help='whether to show results')
+    parser.add_argument('--show_tr', default=False, type=bool, help='whether to show results')
     parser.add_argument('--show_val', default=True, type=bool, help='whether to show results')
     parser.add_argument('--checkpoints', default=False, type=bool, help='whether to continue the last training')
     parser.add_argument('--test', default=False, type=bool, help='only for test or not')

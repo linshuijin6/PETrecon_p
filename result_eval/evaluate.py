@@ -122,8 +122,7 @@ def calculate_ssim(recon, label, window_size=11, C1=0.01 ** 2, C2=0.03 ** 2):
 
 def calculate_metrics(recon: torch.Tensor, label) -> tuple:
     # recon的尺寸为 (batchsize, h, w)， numpy格式
-    recon, label = normalization2one(recon).cpu().numpy().squeeze(), normalization2one(
-        label.cpu().numpy()).cpu().numpy().squeeze()  # 归一化到 [0, 1] 区间
+    recon, label = normalization2one(recon).cpu().numpy().squeeze(), normalization2one(label).cpu().numpy().squeeze()  # 归一化到 [0, 1] 区间
     bs, h, w = recon.shape
     psnr_scores = np.array([psnr(recon[i], label[i], data_range=1.0) for i in range(bs)])
     ssim_scores = np.array([ssim(recon[i], label[i], data_range=1.0) for i in range(bs)])
