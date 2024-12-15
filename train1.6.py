@@ -379,7 +379,8 @@ def main(args, writer):
                                num_heads=[3, 6, 12],
                                mlp_ratio=2.0,
                                upsampler='',
-                               resi_connection='1conv', ).to(rank)
+                               resi_connection='1conv',
+                               window_size_plus=1).to(rank)
     # denoise_model_pre = PETDenoiseNet(device=rank).to(rank)
     # log_writer.add_graph(denoise_model_pre, torch.randn(args.bs, 1, 128, 180).to(rank))
     denoise_model = WaveletFilterNet(180, 128).to(rank)

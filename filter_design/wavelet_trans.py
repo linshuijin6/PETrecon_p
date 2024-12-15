@@ -77,17 +77,74 @@ class WaveletFilterNet(nn.Module):
 
 if __name__ == '__main__':
     # 测试代码
-    device = 'cuda:2'
+    device = 'cuda:7'
     # img = torch.rand(8, 8)  # 创建一个示例图像（8x8）
-    ldct_sino = np.load('/home/ssd/linshuijin/PETrecon_backup/simulation_angular/angular_180/test_transverse_sinoLD.npy', allow_pickle=True)
-    ndct_sino = np.load('/home/ssd/linshuijin/PETrecon_backup/simulation_angular/angular_180/test_transverse_sinoHD.npy', allow_pickle=True)
+    hd_pic = np.load('/home/ssd/linshuijin/PETrecon_backup/simulation_angular/angular_180/test_transverse_picHD.npy', allow_pickle=True)[0:2, :, :]
+    ndct_sino = np.load('/home/ssd/linshuijin/PETrecon_backup/simulation_angular/angular_180/test_transverse_sinoLD.npy', allow_pickle=True)[0:2, :, :]
 
-    img = torch.from_numpy(ldct_sino).float().to(device).unsqueeze(1)
-    net = WaveletFilterNet(128, 180).to(device)
-    recon = net(img)
-    angles = np.linspace(0, np.pi, 180, endpoint=False)
-    radon = Radon(resolution=128, angles=angles, clip_to_circle=True)
-    filtered_sinogram = radon.filter_sinogram(recon.transpose(-1, -2))
+    img = torch.from_numpy(ndct_sino).float().to(device).unsqueeze(1)
+    # img = torch.cat([img, img.flip(dims=[-2])], dim=-1)
+    # plt.imshow(img.squeeze().detach().cpu().numpy()[0], 'gray')
+    # plt.show()
+    img1 = img[:, :, :, 0:90]
+    angles_1 = np.linspace(0, 180, 180, endpoint=False)[0:90]
+    radon = Radon(resolution=128, angles=np.deg2rad(angles_1), clip_to_circle=True)
+    filtered_sinogram = radon.filter_sinogram(img1.transpose(-1, -2), filter_name='ramp')
+    # print(time.time() - t_3)
+    fbp = radon.backprojection(filtered_sinogram)
+    print("重构图像:")
+    plt.imshow(fbp.squeeze().detach().cpu().numpy()[0], 'gray')
+    plt.show()
+
+    diff = np.abs(hd_pic[0, 0, :, :] - fbp.squeeze().detach().cpu().numpy()[0])
+
+    # 创建一个空的RGB图像
+    rgb_img = np.zeros((diff.shape[0], diff.shape[1], 3))
+
+    # 映射到白色和红色之间的颜色
+    # 使用自定义的颜色映射：'Reds' 是Matplotlib的红色渐变色
+    plt.imshow(diff, cmap='Reds', vmin=0, vmax=1)  # 将灰度图映射到白色和红色之间
+    plt.axis('off')
+    plt.show()
+
+    img2 = img[:, :, :, 1::2]
+    angles_2 = np.linspace(1, 180, 180, endpoint=False)[0::2]
+    radon = Radon(resolution=128, angles=np.deg2rad(angles_2), clip_to_circle=True)
+    filtered_sinogram = radon.filter_sinogram(img2.transpose(-1, -2), filter_name='ramp')
+    # print(time.time() - t_3)
+    fbp1 = radon.backprojection(filtered_sinogram)
+    print("重构图像:")
+    plt.imshow(fbp1.squeeze().detach().cpu().numpy()[0], 'gray')
+    plt.show()
+
+    diff1 = np.abs(hd_pic[0, 0, :, :] - fbp1.squeeze().detach().cpu().numpy()[0])
+
+    # 映射到白色和红色之间的颜色
+    # 使用自定义的颜色映射：'Reds' 是Matplotlib的红色渐变色
+    plt.imshow(diff1, cmap='Reds', vmin=0, vmax=1)  # 将灰度图映射到白色和红色之间
+    plt.axis('off')
+    plt.show()
+
+
+
+    theta_s, theta_e, num_theta = 0, 360, 360
+    pic = torch.from_numpy(ld_pic).float().to(device)
+    angles_1 = np.linspace(theta_s, theta_e, num_theta, endpoint=False)
+    radon = Radon(resolution=128, angles=np.deg2rad(angles_1), clip_to_circle=True)
+    recon_sino_360 = radon.forward(pic)
+    plt.imshow(recon_sino_360.squeeze().detach().cpu().numpy()[0], 'gray')
+    plt.show()
+
+
+    img = img[:, :, :, 120:300]
+    # net = WaveletFilterNet(128, 180).to(device)
+    # recon = net(img)
+    theta_s, theta_e = 120, 300
+    angles_1 = np.linspace(theta_s, theta_e, 180, endpoint=False)
+    angles_2 = np.linspace(0, np.pi, 180, endpoint=False)
+    angles_3 = np.linspace(0, np.pi, 60, endpoint=False)
+    radon = Radon(resolution=128, angles=np.deg2rad(angles_1), clip_to_circle=True)
+    filtered_sinogram = radon.filter_sinogram(img.transpose(-1, -2), filter_name='ramp')
     # print(time.time() - t_3)
     fbp = radon.backprojection(filtered_sinogram)
     print("重构图像:")
