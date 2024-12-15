@@ -147,8 +147,8 @@ class WindowAttention(nn.Module):
             mask: (0/-inf) mask with shape of (num_windows, Wh*Ww, Wh*Ww) or None
         """
         B_, N, C = x.shape  # B_: 576 number of Windows * Batch_size in a GPU  N: 64 patch number in a window  C: 180 embedding channel
-        qkv = self.qkv(x).reshape(B_, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
-        q, k, v = qkv[0], qkv[1], qkv[2]  # make torchscript happy (cannot use tensor as tuple)
+        qkv = self.qkv(x).reshape(B_, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)  # 23040,4,180->23040,4,540->23040,4,3,3,60->3,23040,3,4,60
+        q, k, v = qkv[0], qkv[1], qkv[2]  # q:23040,3,4,60 k:23040,3,4,60 v:23040,3,4,60
         # q,k,v (576,6,64,30) (number of Windows * Batch_size in a GPU, number of head, patch number in a window, head_dim)
         q = q * self.scale
         attn = (q @ k.transpose(-2, -1))
@@ -299,6 +299,7 @@ class SwinTransformerBlock(nn.Module):
             shifted_x = x  # shifted_x (4,96,96,180) (batch_in_each_GPU, embedding_channel, H, W)
 
         # partition windows
+        # bs,180,128,C=180->nW*B, window_size, window_size, C->nW*B, window_size*window_size, C
         x_windows = window_partition(shifted_x, self.window_size, self.input_resolution)  # (576,8,8,180) (nW*B, window_size, window_size, C)  nW:number of Windows
         x_windows = x_windows.view(-1, 1 * self.window_size, C)  # (576,64,180) (nW*B, window_size*window_size, C)  nW:number of Windows
 
@@ -549,6 +550,7 @@ class RSTB(nn.Module):
 
     def forward(self, x, x_size):
         return self.patch_embed(self.conv(self.patch_unembed(self.residual_group(x, x_size), x_size))) + x
+    # residual_gropu: RSTB
 
     def flops(self):
         flops = 0
@@ -652,7 +654,7 @@ class PatchUnEmbed(nn.Module):
 
     def forward(self, x, x_size):
         B, HW, C = x.shape
-        x = x.transpose(1, 2).view(B, self.embed_dim, x_size[0], x_size[1])  # B Ph*Pw C
+        x = x.transpose(1, 2).view(B, self.embed_dim, x_size[0], x_size[1])  # B Ph*Pw C -> B C Ph Pw
         return x
 
     def flops(self):
@@ -886,10 +888,11 @@ class SwinIR(nn.Module):
 
     def forward_features(self, x):
         x_size = (x.shape[2], x.shape[3])  # x (4,180,96,96) (batch_size_in_each_GPU, embedding_channel180, H (random-crop 96 in traning and 256 in testing), W) x_size (96,96)
-        x = self.patch_embed(x)  # x (4,9216,180) (batch_size_in_each_GPU, H*W, embedding_channel180)
+        x = self.patch_embed(x)  # x (4,180*128,180) (batch_size_in_each_GPU, H*W, embedding_channel180)
         if self.ape:
             x = x + self.absolute_pos_embed
         x = self.pos_drop(x)
+        # x: (bs, 128*180, c=180)
 
         for layer in self.layers:
             x = layer(x, x_size)
@@ -900,7 +903,7 @@ class SwinIR(nn.Module):
         return x
 
     def forward(self, x):
-        H, W = x.shape[2:]  # x (4,1,96,96) (batch_size_in_each_GPU, input_image_channel, H (random-crop 96 in traning and 256 in testing), W)
+        H, W = x.shape[2:]  # x (4,1,180,128) (batch_size_in_each_GPU, input_image_channel, H (random-crop 96 in traning and 256 in testing), W)
         # x = normalization2one(x)
         x = self.check_image_size(x)  # 检查x的尺寸是否是window_size的整数倍，如果不是，进行padding
         # self.mean = x.mean(dim=(1, 2, 3)).type_as(x)[:, None, None, None]
